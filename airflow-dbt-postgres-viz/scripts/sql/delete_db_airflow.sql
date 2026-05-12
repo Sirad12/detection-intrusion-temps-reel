@@ -1,0 +1,6 @@
+-- 1. Se connecter à une autre base pour libérer la connexion à 'ma_boutique'
+-- \c postgres_db
+
+-- 2. Supprimer la base de données (cela supprime tout : schémas, tables, index)
+DROP DATABASE IF EXISTS airflow;
+DROP DATABASE IF EXISTS metabase_db;

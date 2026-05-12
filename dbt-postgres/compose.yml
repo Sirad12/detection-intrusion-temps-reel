@@ -1,0 +1,141 @@
+name: bigdata_licence
+
+
+services:
+
+  # Postgres ingestion and marts
+  postgres:
+    image: postgres:16.13-alpine
+    container_name: postgres
+    hostname: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres_user -d postgres_db || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s 
+    environment: 
+      POSTGRES_USER: postgres_user
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: postgres
+      POSTGRES_DB: postgres_db
+    volumes:
+      - share_data:/partage
+      - postgres_data:/var/lib/postgresql/data
+    command: >
+      postgres -c wal_level=logical -c max_wal_senders=10 -c max_replication_slots=10
+    ports: 
+      - 5536:5432
+    # OPTIMISATION : Limite les ressources DB
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - bigdata
+      
+  pgadmin:
+    image: dpage/pgadmin4:snapshot
+    #size: 176MB
+    hostname: pgadmin
+    container_name: pgadmin
+    user: "${UID}:${GID}" # Utilise vos identifiants Linux actuels
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      postgres:
+        condition: service_healthy # Attend que le healthcheck de 'postgres' passe
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - 5050:80
+    volumes:
+      - /home/patrick/Téléchargements/ressources/bigdata/pgadmin:/var/lib/pgadmin
+    #healthcheck:
+    #  test: ["CMD-SHELL", 'curl -f http://pgadmin:80/misc/ping || exit 1']
+    #  interval: 10s
+    #  timeout: 5s
+    #  retries: 5
+    #  start_period: 5s
+    networks:
+      - bigdata
+
+  # Only if you don't want to use airflow (unless, dbt is install inside airflow)
+  dbt:
+    build: ./dbt
+    container_name: dbt
+    hostname: dbt
+    tty: true                  # Indispensable pour garder le conteneur ouvert
+    stdin_open: true           # Permet l'interaction
+    command: tail -f /dev/null 
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "dbt", "debug"] # Vérifie la config et la connexion à Trino
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    ports:
+      - 18081:8081 # web doc
+    volumes:
+      - ./dbt/app:/usr/app
+    environment:
+      DBT_PROFILES_DIR: /usr/app
+    depends_on:
+      postgres:
+        #condition: service_started
+        condition: service_healthy
+    networks:
+      - bigdata
+
+  # --- AUTOMATISATION (LANCE LE SCRIPT) ---
+  setup-automation:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile
+    container_name: setup-automation
+    hostname: setup-automation
+    #profiles: ["extra"] # Ne démarrera QUE si vous le demandez explicitement
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./scripts/setup_pipeline.sh:/setup_pipeline.sh
+      - ./scripts/sql:/sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: 
+      - |
+        chmod +x /setup_pipeline.sh
+        cd /
+        source /setup_pipeline.sh
+    networks:
+      - bigdata
+
+
+volumes:
+  postgres_data:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/postgres/postgres_data
+      o: bind
+  share_data:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/share_folder
+      o: bind
+
+networks:
+  bigdata:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: bigdata_bridge

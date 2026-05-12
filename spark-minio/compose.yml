@@ -1,0 +1,213 @@
+name: bigdata_licence
+services:
+
+  spark-master:
+    #size: 551 MB
+    image: apache/spark-py:v3.4.0
+    container_name: spark-master
+    hostname: spark-master
+    user: root
+    restart: always
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: no
+      SPARK_RPC_ENCRYPTION_ENABLED: no
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: no
+      SPARK_SSL_ENABLED: no
+      SPARK_USER: spark
+    # Commande explicite pour l'image officielle
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    ## Launch as master and also worker node
+    #entrypoint: >
+    #  /bin/bash -c "
+    #  /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master &
+    #  /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://localhost:7077 &
+    #  tail -f /dev/null
+    #  "
+    ports:
+      - "8980:8080" # UI Spark
+      - "7977:7077"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://spark-master:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - bigdata
+    volumes:
+      - share_data:/partage
+      - jupyter_pyspark_data:/opt/spark/work-dir
+
+  #spark-worker
+  spark-worker-1:
+    image: apache/spark-py:v3.4.0
+    container_name: spark-worker-1
+    hostname: spark-worker-1
+    user: root
+    restart: always
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    ports:
+      - "8981:8081" # UI Spark Worker
+    environment:
+      SPARK_MODE: worker
+      PYSPARK_PYTHON: python3
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 1G
+      SPARK_WORKER_CORES: 1
+      SPARK_RPC_AUTHENTICATION_ENABLED: no
+      SPARK_RPC_ENCRYPTION_ENABLED: no
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: no
+      SPARK_SSL_ENABLED: no
+      SPARK_USER: spark
+      SPARK_WORKER_WEBUI_PORT: 8081
+    volumes:
+      #- pyspark_data:/opt/spark-apps # Dossier pour vos scripts Python
+      - share_data:/partage
+      - jupyter_pyspark_data:/opt/spark/work-dir
+    #command: sleep infinity
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://spark-worker-1:8081/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - bigdata
+
+  #spark-worker-2:
+  #  image: apache/spark-py:v3.4.0
+  #  container_name: spark-worker-2
+  #  hostname: spark-worker-2
+  #  user: root
+  #  restart: always
+  #  depends_on:
+  #    spark-master:
+  #      condition: service_healthy
+  #  ports:
+  #    - "8982:8082" # UI Spark Worker
+  #  environment:
+  #    SPARK_MODE: worker
+  #    PYSPARK_PYTHON: python3
+  #    SPARK_MASTER_URL: spark://spark-master:7077
+  #    SPARK_WORKER_MEMORY: 1G
+  #    SPARK_WORKER_CORES: 1
+  #    SPARK_RPC_AUTHENTICATION_ENABLED: no
+  #    SPARK_RPC_ENCRYPTION_ENABLED: no
+  #    SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: no
+  #    SPARK_SSL_ENABLED: no
+  #    SPARK_USER: spark
+  #    SPARK_WORKER_WEBUI_PORT: 8082
+  #  volumes:
+  #    #- pyspark_data:/opt/spark-apps # Dossier pour vos scripts Python
+  #    - share_data:/partage
+  #    - jupyter_pyspark_data:/opt/spark/work-dir
+  #  #command: sleep infinity
+  #  command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+  #  healthcheck:
+  #    test: ["CMD", "curl", "-f", "http://spark-worker-2:8082/"]
+  #    interval: 10s
+  #    timeout: 5s
+  #    retries: 10
+  #    start_period: 30s
+  #  networks:
+  #    - bigdata
+
+
+  jupyter-pyspark:
+    image: jupyter/pyspark-notebook:spark-3.4.0
+    #size: 1.7GB
+    container_name: jupyter-pyspark
+    hostname: jupyter-pyspark
+    restart: always
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    user: root
+    ports:
+      - "8988:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - PYSPARK_SUBMIT_ARGS=--packages org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.3.1,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 pyspark-shell
+    #  - JUPYTER_TOKEN=9bde05bc7eb51dfd9fcc8a74db73b7ed2a625d3e9cf216da
+      - JUPYTER_TOKEN=secret
+      - SPARK_OPTS=--packages org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.3.1,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262
+    volumes:
+      - jupyter_pyspark_data:/home/jovyan/work
+      - share_data:/partage
+    healthcheck:
+      #test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://jupyter-pyspark:8888/api"]
+      test: ["CMD", "curl", "-f", "http://localhost:8888/api/status"]
+      interval: 10s # Vérifie toutes les 10 secondes
+      timeout: 5s # Timeout de 5 secondes pour chaque tentative
+      retries: 10 # Nombre de tentatives avant de considérer le service comme non sain
+      start_period: 5s # Délai d'attente avant de commencer les vérifications de santé
+    networks:
+      - bigdata
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: minio
+    hostname: minio
+    ports:
+      - "9030:9000" # API S3
+      - "9031:9001" # Console Web (UI)
+    environment:
+      # Access Key (Username) et de Secret Key (Password)
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+    volumes:
+      - minio_data:/data
+      - share_data:/partage
+    entrypoint: ["/bin/sh", "-c"] # On force le shell ici
+    command: >
+            "minio server /data --console-address ':9001' & 
+             sleep 5; 
+             mc alias set myalias http://localhost:9000 admin password123;
+             wait"
+    restart: always
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - bigdata
+
+volumes:
+  pyspark_data:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/pyspark
+      o: bind
+  jupyter_pyspark_data:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/jupyter-pyspark
+      o: bind
+  minio_data:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/minio
+      o: bind
+  share_data:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/share_folder
+      o: bind
+
+networks:
+  bigdata:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: bigdata_bridge

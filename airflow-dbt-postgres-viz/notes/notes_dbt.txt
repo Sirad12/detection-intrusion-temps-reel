@@ -1,0 +1,56 @@
+some commands:
+    dbt run --select bronze -t dev-bronze
+    dbt run --select silver -t dev-silver
+    dbt run --select gold -t dev-gold
+
+some queries:
+    select count(*) from operations.client;
+    select * from operations.client limit 2;
+
+    select count(*) from operations.deliverer;
+    select * from operations.deliverer limit 2;
+
+    select count(*) from operations.sales;
+    select * from operations.sales limit 2;
+    select * from operations.sales where deliverer_id=8 order by create_at desc limit 1;
+
+    select * from tyrok.bronze_schema.toto limit 2;
+    select * from tyrok.bronze_schema.raw_client limit 2;
+    select * from tyrok.bronze_schema.raw_product limit 2;
+    select * from tyrok.bronze_schema.raw_deliverer limit 2;
+    select * from tyrok.bronze_schema.raw_sales limit 2;
+
+    select * from tyrok.silver_schema.silver_client limit 2;
+    select * from tyrok.silver_schema.silver_sales limit 2;
+
+    select * from tyrok.gold_schema.fact_client limit 2;
+    select * from tyrok.gold_schema.marts_ca_by_month;
+    select * from tyrok.gold_schema.marts_ca_deliverer_by_month;
+    select * from tyrok.gold_schema.marts_ca_product_by_year;
+    select * from tyrok.gold_schema.marts_top_deliverer_by_geo;
+    select * from tyrok.gold_schema.marts_classification_ca_zone;
+
+    select * from tyrok.ia_schema.ml_deliverer_perf_by_month;
+    select * from tyrok.ia_schema.pred_deliverer_next_month;
+    select * from tyrok.ia_schema.ia_pred_deliver_next_month;
+    
+step 2:
+    docker exec -it dbt bash
+    cd /usr/app
+    dbt --version
+    dbt debug # Vérifie la connexion entre dbt et Trino (check profiles.yml)
+        dbt debug -t dev-silver
+    dbt test # test d'integrites des codes et syntaxes
+    dbt list # Liste toutes les ressources de votre projet sans rien exécuter.
+    dbt compile # generated full sql queries
+    dbt run --full-refresh # remise à 0
+        dbt run --full-refresh -t dev-silver
+    dbt run # run all sql files
+        dbt run -t dev-silver
+    dbt run --select my_model # run a specific model
+        dbt run --select my_model -t dev-silver
+    dbt docs generate # generate documentation
+    dbt docs serve --host 0.0.0.0 --port 8001 # run local server    
+    dbt run --vars '{target_branch: dev}' # Si vous avez paramétré votre projet pour pointer vers une branche Nessie spécifique via une variable.
+    dbt clean # Supprime les dossiers target/ et dbt_packages/
+    dbt deps # Télécharge les packages (comme dbt-utils) définis dans votre fichier packages.yml

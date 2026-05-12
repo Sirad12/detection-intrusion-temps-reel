@@ -1,0 +1,280 @@
+name: bigdata_licence
+
+x-airflow-common:
+  &airflow-common
+  #image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.11.2}
+  build: ./airflow
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${AIRFLOW_POSTGRES_DB}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true' # set to False if you want your DAGS activated at creation
+    # Chemin vers le binaire dbt dans le venv
+    DBT_EXECUTABLE_PATH: /opt/airflow/dbt_venv/bin/dbt
+    DBT_ROOT_PATH: /opt/airflow/dbt
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__OPENLINEAGE__NAMESPACE: dev_dbt
+    AIRFLOW__OPENLINEAGE__DISABLED: "True" 
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /tmp/simple_auth_manager_passwords.json
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: 'airflow:admin'
+    # OPTIMISATION : Réduit la charge CPU du scheduler
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 30 #Airflow vérifie les changements toutes les 30 secondes
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 60 # every 60s: Is there any new .py files?
+    AIRFLOW__CORE__PARALLELISM: 4
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 2    
+    AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: False # Désactive la création automatique des connexions par défaut    
+    AIRFLOW__CORE__LAZY_LOAD_PLUGINS: True # Optimise le "Lazy Loading" (chargement à la demande)
+    AIRFLOW__CORE__TEST_CONNECTION: Enabled # test connection activated
+    # DBT config
+    DBT_PROFILES_DIR: /usr/app
+    DBT_LOG_PATH: /tmp/dbt/logs
+    DBT_TARGET_PATH: /tmp/dbt/target
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./dbt/app:/usr/app
+    - airflow_data_logs:/opt/airflow/logs
+    #- airflow_data_plugins:/opt/airflow/plugins
+    - ./simple_auth_manager_passwords.json:/tmp/simple_auth_manager_passwords.json
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+    setup-automation:
+        condition: service_completed_successfully
+  networks:
+    - bigdata
+
+
+services:
+
+  # Postgres ingestion and marts
+  postgres:
+    image: postgres:16.13-alpine
+    container_name: postgres
+    hostname: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres_user -d postgres_db || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s 
+    environment: 
+      POSTGRES_USER: postgres_user
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: postgres
+      POSTGRES_DB: postgres_db
+    volumes:
+      - share_data:/partage
+      - postgres_data:/var/lib/postgresql/data
+    command: >
+      postgres -c wal_level=logical -c max_wal_senders=10 -c max_replication_slots=10
+    ports: 
+      - 5536:5432
+    # OPTIMISATION : Limite les ressources DB
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - bigdata
+      
+  pgadmin:
+    image: dpage/pgadmin4:snapshot
+    #size: 176MB
+    hostname: pgadmin
+    container_name: pgadmin
+    user: "${UID}:${GID}" # Utilise vos identifiants Linux actuels
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      postgres:
+        condition: service_healthy # Attend que le healthcheck de 'postgres' passe
+      setup-automation:
+        condition: service_completed_successfully
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - 5050:80
+    volumes:
+      - /home/patrick/Téléchargements/ressources/bigdata/pgadmin:/var/lib/pgadmin    
+    networks:
+      - bigdata
+
+  airflow-webserver-dbt:
+    <<: *airflow-common
+    hostname: airflow-webserver-dbt
+    container_name: airflow-webserver-dbt
+    command: webserver --workers 3
+    ports:
+      - 8090:8080
+      - 18081:8081 # web doc
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init-dbt:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  airflow-scheduler-dbt:
+    <<: *airflow-common
+    hostname: airflow-scheduler-dbt
+    container_name: airflow-scheduler-dbt
+    command: scheduler    
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init-dbt:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+    ports: 
+      - 5040:4040
+      - 28081:8081 # web doc
+
+  airflow-init-dbt:
+    <<: *airflow-common
+    hostname: airflow-init-dbt
+    container_name: airflow-init-dbt
+    command: bash -c "airflow db migrate && airflow users create \
+      --username airflow \
+      --password airflow \
+      --firstname Admin \
+      --lastname User \
+      --role Admin \
+      --email airflow@example.com"
+    depends_on:
+      <<: *airflow-common-depends-on
+
+  # METABASE
+  metabase:
+    image: metabase/metabase:v0.59.4.3
+    container_name: metabase
+    hostname: metabase
+    #restart: always
+    healthcheck:
+      test: curl --fail -I http://localhost:3000/api/health || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      setup-automation:
+        condition: service_completed_successfully
+    ports:
+      - 3400:3000
+    volumes:
+      - share_data:/partage
+    #  - /dev/urandom:/dev/random:ro
+    environment:
+      # APP config
+      MB_SITE_NAME: "My Company"
+      MB_AUDIT_MAX_RETENTION_DAYS: 1
+      MB_CHECK_FOR_UPDATES: false
+      MB_INSTALL_ANALYTICS_DATABASE: false
+      MB_LOAD_ANALYTICS_CONTENT: false
+      MB_MONITOR_PERFORMANCE: false
+      MB_LDAP_ENABLED: false      
+      MB_SURVEYS_ENABLED: false  
+      MB_NO_SURVEYS: true 
+      MB_LOAD_SAMPLE_CONTENT: false # no examples
+      MB_PASSWORD_COMPLEXITY: weak
+      MB_START_OF_WEEK: monday
+      MB_PERSISTED_MODELS_ENABLED: true
+      MB_PERSISTED_MODEL_REFRESH_CRON_SCHEDULE: 0 0 0/1 * * ? *
+      MB_ANON_TRACKING_ENABLED: false
+      # resources manager
+      JAVA_OPTS: -Xmx512m -Xms256m
+      MB_JETTY_MAXTHREADS: 20   # Réduit de 50 à 15 (suffisant pour 1-3 utilisateurs)
+      MB_JETTY_MINTHREADS: 2    # Minimum de threads au repos
+      MB_DB_CONNECTION_TIMEOUT_MS: 30000 # Évite les crashs si la DB est lente
+      # if you want to use postgres instead of H2
+      #MB_DB_TYPE: h2  # Pour test uniquement, utilisez Postgres en prod
+      MB_DB_TYPE: postgres
+      #MB_DB_CONNECTION_URI: jdbc:postgresql://postgres:5432/tyrok?user=postgres_user&password=postgres&currentSchema=metabase_schema
+      MB_DB_DBNAME: metabase_db
+      MB_DB_PORT: 5432
+      MB_DB_USER: postgres_user
+      MB_DB_PASS: postgres
+      MB_DB_HOST: postgres
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G 
+    networks:
+      - bigdata
+
+  # --- AUTOMATISATION (LANCE LE SCRIPT) ---
+  setup-automation:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile
+    container_name: setup-automation
+    hostname: setup-automation
+    #profiles: ["extra"] # Ne démarrera QUE si vous le demandez explicitement
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./scripts/setup_pipeline.sh:/setup_pipeline.sh
+      - ./scripts/sql:/sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: 
+      - |
+        chmod +x /setup_pipeline.sh
+        cd /
+        source /setup_pipeline.sh
+    networks:
+      - bigdata
+
+
+volumes:
+  postgres_data:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/postgres/postgres_data
+      o: bind
+  airflow_data_logs:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/airflow/logs
+      o: bind
+  share_data:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: /home/patrick/Téléchargements/ressources/share_folder
+      o: bind
+
+networks:
+  bigdata:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: bigdata_bridge

@@ -1,0 +1,61 @@
+name: bigdata_licence #le nom de mon projet docker compose
+#Ce fichier complete le compose.yml en ajoutant les services producer et consumer
+
+services:
+
+  #  Application PRODUCTEUR 
+  kafka-producer:
+    build: 
+      context: C:\Kafka\bigdata_licence\simple_stream\producer 
+      dockerfile: Dockerfile #sert à indiquer le chemin du Dockerfile à utiliser pour construire l'image du producteur
+    container_name: kafka-producer #instance de l'image
+    hostname: kafka-producer 
+    environment: 
+      KAFKA_BROKERS: "redpanda-0:9092,redpanda-1:9092,redpanda-2:9092" #Indique les adresses des brokers Kafka auxquels le producteur doit se connecter pour envoyer les messages
+      KAFKA_TOPIC:   "ids-connexions"
+    ports:
+      - "4000:4000"          # Port pour accéder à l'interface de saisie
+    networks:
+      - bigdata              
+    depends_on:
+      redpanda-0:
+        condition: service_healthy
+    healthcheck:
+      # On vérifie si le port 4000 répond 
+      test: ["CMD-SHELL", "timeout 1s bash -c ':> /dev/tcp/localhost/4000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped 
+
+  # ── Application CONSOMMATEUR 
+  kafka-consumer:
+    build:
+      context: C:\Kafka\bigdata_licence\simple_stream\consumer
+      dockerfile: Dockerfile
+    container_name: kafka-consumer
+    hostname: kafka-consumer
+    environment:
+      KAFKA_BROKERS:  "redpanda-0:9092,redpanda-1:9092,redpanda-2:9092"
+      KAFKA_TOPIC:    "ids-connexions"
+      CONSUMER_GROUP: "bigdata-consumer-group" #permet de gerer la lecture et de repartir les partitions
+      MAX_BUFFER:     "100" #le nbre de message que le consommateur va stocker en memoire avant de les traiter, pour eviter de depasser la memoire disponible
+    ports:
+      - "4004:4004"          # On utilise le 4004 sur ton PC pour ne pas bousculer le Producer
+    networks:
+      - bigdata              
+    depends_on:
+      redpanda-0:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1s bash -c ':> /dev/tcp/localhost/4004' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+networks:
+  bigdata:
+    driver: bridge #sert à créer un réseau de type bridge pour permettre la communication entre les conteneurs du producteur et du consommateur.

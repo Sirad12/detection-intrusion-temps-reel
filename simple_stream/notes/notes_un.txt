@@ -1,0 +1,41 @@
+0-- lancement & arret:
+docker compose up -d 
+docker compose down -v --remove-orphans
+
+============ KCAT
+
+-- Connect
+docker exec -it kcat-client sh # connect inside docker
+docker exec kcat-client kcat -V # only execute kcat command
+# use alias
+alias mykcat='docker exec kcat-client'
+mykcat kcat -V
+
+-- Check version
+kcat -V
+
+-- list infos
+kcat -b redpanda-0:9092 -L # list of brokers and topics
+kcat -b redpanda-0:9092 -L -J | jq -r '.brokers[].name' # only brookers
+kcat -b redpanda-0:9092 -L -J | jq -r '.topics[].topic' # only topics
+
+-- Write or produce messages
+kcat -b redpanda-0:9092 -t un-topic -P # then write messages in terminal (ctrl+D -> send messages)
+echo "'john':{'teste':'voici'}" | kcat -b redpanda-0:9092 -t un-topic -P # send TEXT formated messages with no key
+echo "john:{'teste':'voici'}" | kcat -b redpanda-0:9092 -t un-topic -P -K : # send TEXT formated messages with 'john' as key ('-K :' means key-value sep is ':')
+
+-- Read or Consume messages from a topic
+kcat -b redpanda-0:9092 -t un-topic -C -o beginning -e # all messages from beginning and exit (-e)
+kcat -b redpanda-0:9092 -t un-topic -C -o beginning # read all messages but no exit
+kcat -b redpanda-0:9092 -t un-topic -C -o -5 # last 5 messages and stay connected
+kcat -b redpanda-0:9092 -t un-topic -C -o beginning -J -e | jq . # read all messages from beginning with JSON formated and exit (-e)
+kcat -b redpanda-0:9092 -t un-topic -C -f 'Clé: %k | Message: %s\n' # show pairs (key,value)
+kcat -b redpanda-0:9092 -t un-topic -C -o beginning -f 'Clé: %k | Message: %s\n'
+
+============ KAFKA
+
+cd /opt/kafka/bin/
+./kafka-topics.sh --list --bootstrap-server localhost:9092
+./kafka-topics.sh --describe --topic fullfillment --bootstrap-server localhost:9092
+./kafka-console-consumer.sh --topic fullfillment.TYROK --from-beginning --bootstrap-server localhost:9092
+./kafka-console-consumer.sh --topic fullfillment.TYROK.TYROK.client --from-beginning --bootstrap-server localhost:9092

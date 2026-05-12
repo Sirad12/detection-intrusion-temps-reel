@@ -1,0 +1,9 @@
+# modern catalogs
+https://www.e6data.com/blog/iceberg-catalogs-2025-emerging-catalogs-modern-metadata-management
+
+# iceberg metastore config
+https://trino.io/docs/current/object-storage/metastores.html
+
+# nessie demos
+https://github.com/projectnessie/nessie-demos/tree/main
+

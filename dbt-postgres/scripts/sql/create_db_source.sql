@@ -1,0 +1,15 @@
+-- -- 1. Création de la base de données
+-- -- Note : À exécuter en étant connecté à la base par défaut 'postgres'
+-- CREATE DATABASE boutique_a;
+-- 
+-- -- 2. Connexion à la nouvelle base de données
+-- \c boutique_a
+-- 
+-- -- 3. Création d'un schéma personnalisé
+-- -- Il est recommandé de ne pas utiliser le schéma 'public' par défaut
+-- CREATE SCHEMA IF NOT EXISTS operations;
+-- 
+-- -- 3. droits
+-- -- Optional: Restore default permissions
+-- GRANT ALL ON SCHEMA operations TO postgres_user;
+-- GRANT ALL ON SCHEMA operations TO public;
