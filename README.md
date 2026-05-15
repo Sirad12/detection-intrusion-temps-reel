@@ -51,6 +51,7 @@ detection-intrusion-temps-reel/
 ## 👩🏾‍💻 Auteure
 **Ndeye Sira Dia** — Étudiante en Licence Informatique option Big Data  
 Dakar Institute of Technology  
+
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://linkedin.com/in/sira-dia)
 [![GitHub](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.com/Sirad12)
 
