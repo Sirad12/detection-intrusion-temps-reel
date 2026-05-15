@@ -1,4 +1,4 @@
-# 🛡️ Système de Détection d'Intrusion en Temps Réel
+#  Système de Détection d'Intrusion en Temps Réel
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white)
 ![Kafka](https://img.shields.io/badge/Apache_Kafka-231F20?style=flat&logo=apachekafka&logoColor=white)
